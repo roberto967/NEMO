@@ -7,17 +7,17 @@
 #ifndef _IOT_SERVO_H_
 #define _IOT_SERVO_H_
 
-#include "esp_err.h"
-#include "driver/ledc.h"
 #include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "esp_err.h"
 
 /**
  * @brief Configuration of servo motor channel
  *
  */
 typedef struct {
-    gpio_num_t servo_pin[LEDC_CHANNEL_MAX];     /**< Pin number of pwm output */
-    ledc_channel_t ch[LEDC_CHANNEL_MAX];    /**< The ledc channel which used */
+  gpio_num_t servo_pin[LEDC_CHANNEL_MAX]; /**< Pin number of pwm output */
+  ledc_channel_t ch[LEDC_CHANNEL_MAX];    /**< The ledc channel which used */
 } servo_channel_t;
 
 /**
@@ -25,13 +25,15 @@ typedef struct {
  *
  */
 typedef struct {
-    uint16_t max_angle;        /**< Servo max angle */
-    uint16_t min_width_us;     /**< Pulse width corresponding to minimum angle, which is usually 500us */
-    uint16_t max_width_us;     /**< Pulse width corresponding to maximum angle, which is usually 2500us */
-    uint32_t freq;             /**< PWM frequency */
-    ledc_timer_t timer_number; /**< Timer number of ledc */
-    servo_channel_t channels;  /**< Channels to use */
-    uint8_t channel_number;    /**< Total channel number */
+  uint16_t max_angle;    /**< Servo max angle */
+  uint16_t min_width_us; /**< Pulse width corresponding to minimum angle, which
+                            is usually 500us */
+  uint16_t max_width_us; /**< Pulse width corresponding to maximum angle, which
+                            is usually 2500us */
+  uint32_t freq;         /**< PWM frequency */
+  ledc_timer_t timer_number; /**< Timer number of ledc */
+  servo_channel_t channels;  /**< Channels to use */
+  uint8_t channel_number;    /**< Total channel number */
 } servo_config_t;
 
 #ifdef __cplusplus
@@ -41,7 +43,8 @@ extern "C" {
 /**
  * @brief Initialize ledc to control the servo
  *
- * @param speed_mode Select the LEDC channel group with specified speed mode. Note that not all targets support high speed mode.
+ * @param speed_mode Select the LEDC channel group with specified speed mode.
+ * Note that not all targets support high speed mode.
  * @param config Pointer of servo configure struct
  *
  * @return
@@ -74,7 +77,8 @@ esp_err_t iot_servo_deinit(ledc_mode_t speed_mode);
  *     - ESP_OK Success
  *     - ESP_ERR_INVALID_ARG Parameter error
  */
-esp_err_t iot_servo_write_angle(ledc_mode_t speed_mode, uint8_t channel, float angle);
+esp_err_t iot_servo_write_angle(ledc_mode_t speed_mode, uint8_t channel,
+                                float angle);
 
 /**
  * @brief Read current angle of one channel
@@ -87,7 +91,8 @@ esp_err_t iot_servo_write_angle(ledc_mode_t speed_mode, uint8_t channel, float a
  *     - ESP_OK Success
  *     - ESP_ERR_INVALID_ARG Parameter error
  */
-esp_err_t iot_servo_read_angle(ledc_mode_t speed_mode, uint8_t channel, float *angle);
+esp_err_t iot_servo_read_angle(ledc_mode_t speed_mode, uint8_t channel,
+                               float *angle);
 
 #ifdef __cplusplus
 }
