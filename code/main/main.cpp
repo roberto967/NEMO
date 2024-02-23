@@ -2,6 +2,9 @@
 
 using namespace std;
 
+static const gpio_num_t SERVO_FG1_PIN = GPIO_NUM_5;
+static const ledc_channel_t SERVO_FG1_CHANNEL = LEDC_CHANNEL_0;
+
 servo_config_t servo_foodgate_1 = {
     .max_angle = 180,     // Ângulo máximo do servo
     .min_width_us = 500,  // Largura de pulso mínima para o ângulo mínimo
@@ -12,18 +15,23 @@ servo_config_t servo_foodgate_1 = {
         {
             .servo_pin =
                 {
-                    GPIO_NUM_5,
+                    SERVO_FG1_PIN,
                 },
             .ch =
                 {
-                    LEDC_CHANNEL_0, // Usando apenas o primeiro canal LEDC
+                    SERVO_FG1_CHANNEL,
                 },
         },
     .channel_number = 1, // Configurando apenas um canal
 };
 
 // Função para abrir e fechar comporta de comida
-void open_foodgate() { iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, 0, 180.0f); }
+void open_foodgate() {
+  iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, 0, 180.0f);
+
+  // dai espera o tempo que a comida cai pra poder fechar, vai precisar
+  // sincronizar com o sensor de peso
+}
 
 extern "C" void app_main(void) {
 
