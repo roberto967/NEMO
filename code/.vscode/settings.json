@@ -1,11 +1,15 @@
 {
-  "C_Cpp.intelliSenseEngine": "Tag Parser",
-  "idf.adapterTargetName": "esp32",
-  "idf.openOcdConfigs": ["board/esp32-wrover-kit-3.3v.cfg"],
-  "idf.port": "/dev/ttyUSB0",
-  "idf.flashType": "UART",
-  "files.associations": {
-    "iostream": "cpp"
-  },
-  "idf.portWin": "COM4"
+	"C_Cpp.intelliSenseEngine": "Tag Parser",
+	"idf.adapterTargetName": "esp32",
+	"idf.openOcdConfigs": ["board/esp32-wrover-kit-3.3v.cfg"],
+	"idf.port": "/dev/ttyUSB0",
+	"idf.flashType": "UART",
+	"files.associations": {
+		"*.jsx": "javascriptreact",
+		"iostream": "cpp",
+		"compare": "c",
+		"cstdint": "c",
+		"format": "c"
+	},
+	"idf.portWin": "COM3"
 }
