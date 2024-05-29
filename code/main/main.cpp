@@ -43,6 +43,7 @@ void oc_foodgate(void) {
   // Abre a comporta
   ESP_ERROR_CHECK(
       iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, SERVO_FG1_CHANNEL, 180.0f));
+  ESP_LOGI("FOOD_GATE", "Food gate opened");
 
   // Espera o tempo que a comida cai pra poder fechar, precisa
   // sincronizar com o sensor de peso
@@ -50,6 +51,7 @@ void oc_foodgate(void) {
   // Fecha a comporta
   ESP_ERROR_CHECK(
       iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, SERVO_FG1_CHANNEL, 0.0f));
+  ESP_LOGI("FOOD_GATE", "Food gate closed");
 }
 
 extern "C" void app_main(void) {
