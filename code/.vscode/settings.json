@@ -9,7 +9,15 @@
 		"iostream": "cpp",
 		"compare": "c",
 		"cstdint": "c",
-		"format": "c"
+		"format": "c",
+		"bitset": "cpp",
+		"esp_log.h": "c",
+		"random": "cpp",
+		"array": "cpp",
+		"string": "cpp",
+		"string_view": "cpp",
+		"span": "cpp",
+		"future": "c"
 	},
 	"idf.portWin": "COM3"
 }
