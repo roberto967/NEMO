@@ -1,183 +1,152 @@
-/*
- * Copyright (c) 2019 Ruslan V. Uss <unclerus@gmail.com>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *    this list of conditions and the following disclaimer in the documentation
- *    and/or other materials provided with the distribution.
- * 3. Neither the name of the copyright holder nor the names of itscontributors
- *    may be used to endorse or promote products derived from this software without
- *    specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-/**
- * @file hx711.c
- *
- * ESP-IDF driver for HX711 24-bit ADC for weigh scales
- *
- * Copyright (c) 2019 Ruslan V. Uss <unclerus@gmail.com>
- *
- * BSD Licensed as described in the file LICENSE
- */
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_timer.h>
-#include <ets_sys.h>
-#include <esp_idf_lib_helpers.h>
 #include "hx711.h"
+#include "esp_log.h"
+#include <rom/ets_sys.h>
 
-#define CHECK(x) do { esp_err_t __; if ((__ = x) != ESP_OK) return __; } while (0)
-#define CHECK_ARG(VAL) do { if (!(VAL)) return ESP_ERR_INVALID_ARG; } while (0)
+#define HIGH 1
+#define LOW 0
+#define CLOCK_DELAY_US 20
 
-#if HELPER_TARGET_IS_ESP32
-static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
-#endif
+#define DEBUGTAG "HX711"
 
-static uint32_t read_raw(gpio_num_t dout, gpio_num_t pd_sck, hx711_gain_t gain)
-{
-#if HELPER_TARGET_IS_ESP32
-    portENTER_CRITICAL(&mux);
-#elif HELPER_TARGET_IS_ESP8266
-    portENTER_CRITICAL();
-#endif
+static gpio_num_t GPIO_PD_SCK =
+    GPIO_NUM_15; // Power Down and Serial Clock Input Pin
+static gpio_num_t GPIO_DOUT = GPIO_NUM_14; // Serial Data Output Pin
+static HX711_GAIN GAIN = eGAIN_128;        // amplification factor
+static unsigned long OFFSET = 0;           // used for tare weight
+static float ESCALA = 296600; // used in calibration, puts a known weight after
+                              // the tare and divides the gross value by the
+                              // weight in kg, varies according to the sensor
 
-    // read data
-    uint32_t data = 0;
-    for (size_t i = 0; i < 24; i++)
-    {
-        gpio_set_level(pd_sck, 1);
-        ets_delay_us(1);
-        data |= gpio_get_level(dout) << (23 - i);
-        gpio_set_level(pd_sck, 0);
-        ets_delay_us(1);
-    }
+void HX711_init(gpio_num_t dout, gpio_num_t pd_sck, HX711_GAIN gain) {
+  GPIO_PD_SCK = pd_sck;
+  GPIO_DOUT = dout;
 
-    // config gain + channel for next read
-    for (size_t i = 0; i <= gain; i++)
-    {
-        gpio_set_level(pd_sck, 1);
-        ets_delay_us(1);
-        gpio_set_level(pd_sck, 0);
-        ets_delay_us(1);
-    }
+  gpio_config_t io_conf;
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.mode = GPIO_MODE_OUTPUT;
+  io_conf.pin_bit_mask = (1ULL << GPIO_PD_SCK);
+  io_conf.pull_down_en = 0;
+  io_conf.pull_up_en = 0;
+  gpio_config(&io_conf);
 
-#if HELPER_TARGET_IS_ESP32
-    portEXIT_CRITICAL(&mux);
-#elif HELPER_TARGET_IS_ESP8266
-    portEXIT_CRITICAL();
-#endif
+  io_conf.intr_type = GPIO_INTR_DISABLE;
+  io_conf.pin_bit_mask = (1ULL << GPIO_DOUT);
+  io_conf.mode = GPIO_MODE_INPUT;
+  io_conf.pull_up_en = 0;
+  gpio_config(&io_conf);
 
-    return data;
+  HX711_set_gain(gain);
 }
 
-///////////////////////////////////////////////////////////////////////////////
+bool HX711_is_ready() { return gpio_get_level(GPIO_DOUT); }
 
-esp_err_t hx711_init(hx711_t *dev)
-{
-    CHECK_ARG(dev);
-
-    gpio_config_t conf = {
-        .pin_bit_mask = BIT(dev->dout),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = 0,
-        .pull_down_en = 0,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    CHECK(gpio_config(&conf));
-
-    conf.pin_bit_mask = BIT(dev->pd_sck);
-    conf.mode = GPIO_MODE_OUTPUT;
-    CHECK(gpio_config(&conf));
-
-    CHECK(hx711_power_down(dev, false));
-
-    return hx711_set_gain(dev, dev->gain);
+void HX711_set_gain(HX711_GAIN gain) {
+  GAIN = gain;
+  gpio_set_level(GPIO_PD_SCK, LOW);
+  HX711_read();
 }
 
-esp_err_t hx711_power_down(hx711_t *dev, bool down)
-{
-    CHECK_ARG(dev);
+uint8_t HX711_shiftIn() {
+  uint8_t value = 0;
 
-    CHECK(gpio_set_level(dev->pd_sck, down));
-    vTaskDelay(1);
+  for (int i = 0; i < 8; ++i) {
+    gpio_set_level(GPIO_PD_SCK, HIGH);
+    ets_delay_us(CLOCK_DELAY_US);
+    value |= gpio_get_level(GPIO_DOUT) << (7 - i); // get level returns
+    gpio_set_level(GPIO_PD_SCK, LOW);
+    ets_delay_us(CLOCK_DELAY_US);
+  }
 
-    return ESP_OK;
+  return value;
 }
 
-esp_err_t hx711_set_gain(hx711_t *dev, hx711_gain_t gain)
-{
-    CHECK_ARG(dev && gain <= HX711_GAIN_A_64);
+unsigned long HX711_read() {
+  gpio_set_level(GPIO_PD_SCK, LOW);
+  // wait for the chip to become ready
+  while (HX711_is_ready()) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+  }
 
-    CHECK(hx711_wait(dev, 200)); // 200 ms timeout
+  unsigned long value = 0;
 
-    read_raw(dev->dout, dev->pd_sck, gain);
-    dev->gain = gain;
+  //--- Enter critical section ----
+  portDISABLE_INTERRUPTS();
 
-    return ESP_OK;
+  for (int i = 0; i < 24; i++) {
+    gpio_set_level(GPIO_PD_SCK, HIGH);
+    ets_delay_us(CLOCK_DELAY_US);
+    value = value << 1;
+    gpio_set_level(GPIO_PD_SCK, LOW);
+    ets_delay_us(CLOCK_DELAY_US);
+
+    if (gpio_get_level(GPIO_DOUT))
+      value++;
+  }
+
+  // set the channel and the gain factor for the next reading using the clock
+  // pin
+  for (unsigned int i = 0; i < GAIN; i++) {
+    gpio_set_level(GPIO_PD_SCK, HIGH);
+    ets_delay_us(CLOCK_DELAY_US);
+    gpio_set_level(GPIO_PD_SCK, LOW);
+    ets_delay_us(CLOCK_DELAY_US);
+  }
+  portENABLE_INTERRUPTS();
+  //--- Exit critical section ----
+
+  value = value ^ 0x800000;
+
+  return (value);
 }
 
-esp_err_t hx711_is_ready(hx711_t *dev, bool *ready)
-{
-    CHECK_ARG(dev && ready);
-
-    *ready = !gpio_get_level(dev->dout);
-
-    return ESP_OK;
+unsigned long HX711_read_average(char times) {
+  ESP_LOGI(DEBUGTAG,
+           "===================== READ AVERAGE START ====================");
+  unsigned long sum = 0;
+  for (char i = 0; i < times; i++) {
+    sum += HX711_read();
+  }
+  ESP_LOGI(DEBUGTAG,
+           "===================== READ AVERAGE END : %ld ====================",
+           (sum / times));
+  return sum / times;
 }
 
-esp_err_t hx711_wait(hx711_t *dev, size_t timeout_ms)
-{
-    uint64_t started = esp_timer_get_time() / 1000;
-    while (esp_timer_get_time() / 1000 - started < timeout_ms)
-    {
-        if (!gpio_get_level(dev->dout))
-            return ESP_OK;
-        vTaskDelay(1);
-    }
-
-    return ESP_ERR_TIMEOUT;
+unsigned long HX711_get_value(char times) {
+  unsigned long avg = HX711_read_average(times);
+  if (avg > OFFSET)
+    return avg - OFFSET;
+  else {
+    ESP_LOGE(DEBUGTAG, "===================== OFFSET GREATER THAN AVERAGE "
+                       "====================");
+    return 0;
+  }
 }
 
-esp_err_t hx711_read_data(hx711_t *dev, int32_t *data)
-{
-    CHECK_ARG(dev && data);
+float HX711_get_units(char times) { return HX711_get_value(times) / ESCALA; }
 
-    uint32_t raw = read_raw(dev->dout, dev->pd_sck, dev->gain);
-    if (raw & 0x800000)
-        raw |= 0xff000000;
-    *data = *((int32_t *)&raw);
-
-    return ESP_OK;
+void HX711_tare() {
+  ESP_LOGI(DEBUGTAG, "===================== START TARE ====================");
+  unsigned long sum = 0;
+  sum = HX711_read_average(20);
+  HX711_set_offset(sum);
+  ESP_LOGI(DEBUGTAG,
+           "===================== END TARE: %ld ====================", sum);
 }
 
-esp_err_t hx711_read_average(hx711_t *dev, size_t times, int32_t *data)
-{
-    CHECK_ARG(dev && times && data);
+void HX711_set_ESCALA(float ESCALA) { ESCALA = ESCALA; }
 
-    int32_t v;
-    *data = 0;
-    for (size_t i = 0; i < times; i++)
-    {
-        CHECK(hx711_wait(dev, 200));
-        CHECK(hx711_read_data(dev, &v));
-        *data += v;
-    }
-    *data /= (int32_t) times;
+float HX711_get_ESCALA() { return ESCALA; }
 
-    return ESP_OK;
+void HX711_set_offset(unsigned long offset) { OFFSET = offset; }
+
+unsigned long HX711_get_offset(unsigned long offset) { return OFFSET; }
+
+void HX711_power_down() {
+  gpio_set_level(GPIO_PD_SCK, LOW);
+  ets_delay_us(CLOCK_DELAY_US);
+  gpio_set_level(GPIO_PD_SCK, HIGH);
+  ets_delay_us(CLOCK_DELAY_US);
 }
+
+void HX711_power_up() { gpio_set_level(GPIO_PD_SCK, LOW); }

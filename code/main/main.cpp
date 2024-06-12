@@ -11,7 +11,27 @@ using namespace std;
 #define ECHO_GPIO GPIO_NUM_5
 #define TRIGGER_GPIO GPIO_NUM_18
 
+// Pins relacionados ao sensor de peso
+#define AVG_SAMPLES 10        // Número de amostras para média
+#define GPIO_DATA GPIO_NUM_4  // Data
+#define GPIO_SCLK GPIO_NUM_23 // Serial Clock
+
 servo_config_t servo_foodgate_1;
+
+static const char *TAG_HX711 = "HX711_TEST";
+
+static void weight_reading_task(void *arg) {
+  HX711_init(GPIO_DATA, GPIO_SCLK, eGAIN_128);
+  HX711_tare(); // Zera a balança
+
+  float weight = 0;
+
+  while (1) {
+    weight = HX711_get_units(AVG_SAMPLES); // Lê o peso em gramas
+    ESP_LOGI(TAG_HX711, "Peso: %f kg", weight);
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+  }
+}
 
 void setup_servo(void) {
   servo_foodgate_1 = {

@@ -10,8 +10,6 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 
-#include "peso_funcs.h"
-
 extern "C" {
 #include "hx711.h"
 #include "iot_servo.h"
