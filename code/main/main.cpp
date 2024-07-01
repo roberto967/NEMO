@@ -1,80 +1,69 @@
 #include "main.h"
 
+#include "esp_log.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <esp_netif.h>
+#include <esp_wifi.h>
+#include <inttypes.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "wifi_manager.h"
+
 using namespace std;
 
-// Pins do servo que abre a comporta de comida
-#define SERVO_FG1_GPIO GPIO_NUM_26
-#define SERVO_FG1_CHANNEL LEDC_CHANNEL_0
+/* @brief tag used for ESP serial console messages */
+static const char TAG[] = "main";
 
-// Pins do sensor de proximidade
-#define MAX_DISTANCE_CM 500 // 5m max
-#define ECHO_GPIO GPIO_NUM_5
-#define TRIGGER_GPIO GPIO_NUM_18
-
-// Pins relacionados ao sensor de peso
-#define AVG_SAMPLES 10        // Número de amostras para média
-#define GPIO_DATA GPIO_NUM_4  // Data
-#define GPIO_SCLK GPIO_NUM_23 // Serial Clock
-
-servo_config_t servo_foodgate_1;
-
-static const char *TAG_HX711 = "HX711_TEST";
-
-static void weight_reading_task(void *arg) {
-  HX711_init(GPIO_DATA, GPIO_SCLK, eGAIN_128);
-  HX711_tare(); // Zera a balança
-
-  float weight = 0;
-
-  while (1) {
-    weight = HX711_get_units(AVG_SAMPLES); // Lê o peso em gramas
-    ESP_LOGI(TAG_HX711, "Peso: %f kg", weight);
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
+/**
+ * @brief RTOS task that periodically prints the heap memory available.
+ * @note Pure debug information, should not be ever started on production code!
+ * This is an example on how you can integrate your code with wifi-manager
+ */
+void monitoring_task(void *pvParameter) {
+  for (;;) {
+    ESP_LOGI(TAG, "free heap: %" PRIu32, esp_get_free_heap_size());
+    vTaskDelay(pdMS_TO_TICKS(10000));
   }
 }
 
-void setup_servo(void) {
-  servo_foodgate_1 = {
-      .max_angle = 180,     // Ângulo máximo do servo
-      .min_width_us = 500,  // Largura de pulso mínima para o ângulo mínimo
-      .max_width_us = 2500, // Largura de pulso máxima para o ângulo máximo
-      .freq = 50,           // Frequência do sinal PWM
-      .timer_number = LEDC_TIMER_0, // Número do temporizador LEDC
-      .channels =
-          {
-              .servo_pin =
-                  {
-                      SERVO_FG1_GPIO,
-                  },
-              .ch =
-                  {
-                      SERVO_FG1_CHANNEL,
-                  },
-          },
-      .channel_number = 1, // Configurando apenas um canal
-  };
+/**
+ * @brief this is an exemple of a callback that you can setup in your own app to
+ * get notified of wifi manager event.
+ */
+void cb_connection_ok(void *pvParameter) {
+  ip_event_got_ip_t *param = (ip_event_got_ip_t *)pvParameter;
 
-  // Inicialização do servo da comporta de comida
-  ESP_ERROR_CHECK(iot_servo_init(LEDC_HIGH_SPEED_MODE, &servo_foodgate_1));
-}
+  /* transform IP to human readable string */
+  char str_ip[16];
+  esp_ip4addr_ntoa(&param->ip_info.ip, str_ip, IP4ADDR_STRLEN_MAX);
 
-// Função para abrir e fechar comporta de comida
-void oc_foodgate(void) {
-  // Abre a comporta
-  ESP_ERROR_CHECK(
-      iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, SERVO_FG1_CHANNEL, 180.0f));
-  ESP_LOGI("FOOD_GATE", "Food gate opened");
+  ESP_LOGI(TAG, "I have a connection and my IP is %s!", str_ip);
 
-  // Espera o tempo que a comida cai pra poder fechar, precisa
-  // sincronizar com o sensor de peso
-
-  // Fecha a comporta
-  ESP_ERROR_CHECK(
-      iot_servo_write_angle(LEDC_HIGH_SPEED_MODE, SERVO_FG1_CHANNEL, 0.0f));
-  ESP_LOGI("FOOD_GATE", "Food gate closed");
+  uint8_t baseMac[6];
+  esp_err_t ret = esp_wifi_get_mac(WIFI_IF_STA, baseMac);
+  if (ret == ESP_OK) {
+    ESP_LOGI(
+        TAG,
+        "I have a conection and my MAC is: %02x:%02x:%02x:%02x:%02x:%02x!\n",
+        baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
+  } else {
+    ESP_LOGE(TAG, "Failed to read MAC address");
+  }
 }
 
 extern "C" void app_main(void) {
-  // Inicializar o servo da comporta de comida
-  setup_servo();
+  /* start the wifi manager */
+  wifi_manager_start();
+
+  /* register a callback as an example to how you can integrate your code with
+   * the wifi manager */
+  wifi_manager_set_callback(WM_EVENT_STA_GOT_IP, &cb_connection_ok);
+
+  /* your code should go here. Here we simply create a task on core 2 that
+   * monitors free heap memory */
+  xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1,
+                          NULL, 1);
 }
