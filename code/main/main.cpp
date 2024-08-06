@@ -1,9 +1,11 @@
 #include "main.h"
 
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "rom/gpio.h"
 #include <esp_netif.h>
 #include <esp_wifi.h>
 #include <inttypes.h>
@@ -28,6 +30,38 @@ void monitoring_task(void *pvParameter) {
     vTaskDelay(pdMS_TO_TICKS(10000));
   }
 }
+
+xQueueHandle btn_evt_queue;
+
+static void IRAM_ATTR gpio_isr_handler(void *args) {
+  int pino = (int)args;
+  xQueueSendFromISR(btn_evt_queue, &pino, NULL);
+}
+
+class disconectBtn {
+private:
+  gpio_num_t BTN_DISC = GPIO_NUM_0;
+
+public:
+  void setButtonPin(gpio_num_t pin) { BTN_DISC = pin; }
+  gpio_num_t getButtonPin() { return BTN_DISC; }
+
+  void setup() {
+    // Configura pino para interrupção
+    gpio_pad_select_gpio(this->BTN_DISC);
+    // Configura o pino do Botão como Entrada
+    gpio_set_direction(this->BTN_DISC, GPIO_MODE_INPUT);
+    // Configura o resistor de Pulldown para o botão (por padrão a entrada
+    // estará em Zero)
+    gpio_pulldown_en(this->BTN_DISC);
+    // Desabilita o resistor de Pull-up por segurança.
+    gpio_pullup_dis(this->BTN_DISC);
+    // Configura pino para interrupção
+    gpio_set_intr_type(this->BTN_DISC, GPIO_INTR_NEGEDGE);
+  }
+
+  void task(void *pvParameter) {}
+};
 
 /**
  * @brief this is an exemple of a callback that you can setup in your own app to
@@ -66,4 +100,9 @@ extern "C" void app_main(void) {
    * monitors free heap memory */
   xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1,
                           NULL, 1);
+
+  // Parte em testes
+  btn_evt_queue = xQueueCreate(10, sizeof(int));
+  // xTaskCreate(trataInterrupcaoBotao, "TrataBotao", 2048, NULL, 1, NULL);
+  gpio_install_isr_service(0);
 }
