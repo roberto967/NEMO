@@ -41,6 +41,7 @@ static void IRAM_ATTR gpio_isr_handler(void *args) {
 class disconectBtn {
 private:
   gpio_num_t BTN_DISC = GPIO_NUM_0;
+  const char *TAG = "DisconectBtn";
 
 public:
   void setButtonPin(gpio_num_t pin) { BTN_DISC = pin; }
@@ -60,7 +61,30 @@ public:
     gpio_set_intr_type(this->BTN_DISC, GPIO_INTR_NEGEDGE);
   }
 
-  void task(void *pvParameter) {}
+  void disconec_interrup(void *pvParameter) {
+    // De-bouncing
+    int estado = gpio_get_level(this->BTN_DISC);
+    if (estado == 1) {
+      gpio_isr_handler_remove(this->BTN_DISC);
+      while (gpio_get_level(this->BTN_DISC) == estado) {
+        vTaskDelay(50 / portTICK_PERIOD_MS);
+      }
+
+      // Desconecta e esquece a rede
+      wifi_manager_disconnect_async();
+
+      // Iniciar o AP para nova seleção de rede
+      ESP_LOGI(
+          TAG,
+          "斜め七十七度の並びで泣く泣く嘶くナナハン七台難なく並べて長眺め...");
+      wifi_manager_send_message(WM_ORDER_START_AP, NULL);
+
+      // Habilitar novamente a interrupção
+      vTaskDelay(50 / portTICK_PERIOD_MS);
+      gpio_isr_handler_add(this->BTN_DISC, gpio_isr_handler,
+                           (void *)this->BTN_DISC);
+    }
+  }
 };
 
 /**
