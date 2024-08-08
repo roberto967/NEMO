@@ -15,7 +15,6 @@
 extern "C" {
 #include "hx711.h"
 #include "iot_servo.h"
-#include "ultrasonic.h"
 #include "wifi_manager.h"
 #include <stdio.h>
 #include <string.h>

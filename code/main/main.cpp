@@ -31,23 +31,17 @@ void monitoring_task(void *pvParameter) {
   }
 }
 
-xQueueHandle btn_evt_queue;
-
-static void IRAM_ATTR gpio_isr_handler(void *args) {
-  int pino = (int)args;
-  xQueueSendFromISR(btn_evt_queue, &pino, NULL);
-}
-
-class disconectBtn {
+class DisconectBtn {
 private:
   gpio_num_t BTN_DISC = GPIO_NUM_0;
   const char *TAG = "DisconectBtn";
-
-public:
-  void setButtonPin(gpio_num_t pin) { BTN_DISC = pin; }
-  gpio_num_t getButtonPin() { return BTN_DISC; }
+  xQueueHandle btn_evt_queue;
 
   void setup() {
+    // Instala o serviço de interrupção
+    gpio_install_isr_service(0);
+    // Adiciona a interrupção ao pino
+    gpio_isr_handler_add(this->BTN_DISC, gpio_isr_handler, this);
     // Configura pino para interrupção
     gpio_pad_select_gpio(this->BTN_DISC);
     // Configura o pino do Botão como Entrada
@@ -59,7 +53,18 @@ public:
     gpio_pullup_dis(this->BTN_DISC);
     // Configura pino para interrupção
     gpio_set_intr_type(this->BTN_DISC, GPIO_INTR_NEGEDGE);
+    // Cria a fila de eventos
+    btn_evt_queue = xQueueCreate(2, sizeof(int));
   }
+
+public:
+  DisconectBtn(gpio_num_t BTN_DISC) {
+    this->BTN_DISC = BTN_DISC;
+    setup();
+  }
+
+  void setButtonPin(gpio_num_t pin) { BTN_DISC = pin; }
+  gpio_num_t getButtonPin() { return BTN_DISC; }
 
   void disconec_interrup(void *pvParameter) {
     // De-bouncing
@@ -81,15 +86,34 @@ public:
 
       // Habilitar novamente a interrupção
       vTaskDelay(50 / portTICK_PERIOD_MS);
-      gpio_isr_handler_add(this->BTN_DISC, gpio_isr_handler,
-                           (void *)this->BTN_DISC);
+      gpio_isr_handler_add(this->BTN_DISC, gpio_isr_handler, this);
     }
+  }
+
+  void start() {
+    xTaskCreate(&button_task, "button_task", 2048, this, 10, NULL);
+  }
+
+  static void button_task(void *pvParameter) {
+    DisconectBtn *btn = static_cast<DisconectBtn *>(pvParameter);
+    int pino;
+    for (;;) {
+      if (xQueueReceive(btn->btn_evt_queue, &pino, portMAX_DELAY)) {
+        btn->disconec_interrup(NULL);
+      }
+    }
+  }
+
+  static void IRAM_ATTR gpio_isr_handler(void *args) {
+    DisconectBtn *btn = static_cast<DisconectBtn *>(args);
+    int pino = btn->BTN_DISC;
+    xQueueSendFromISR(btn->btn_evt_queue, &pino, NULL);
   }
 };
 
 /**
- * @brief this is an exemple of a callback that you can setup in your own app to
- * get notified of wifi manager event.
+ * @brief this is an example of a callback that you can set up in your own app
+ * to get notified of wifi manager event.
  */
 void cb_connection_ok(void *pvParameter) {
   ip_event_got_ip_t *param = (ip_event_got_ip_t *)pvParameter;
@@ -105,7 +129,7 @@ void cb_connection_ok(void *pvParameter) {
   if (ret == ESP_OK) {
     ESP_LOGI(
         TAG,
-        "I have a conection and my MAC is: %02x:%02x:%02x:%02x:%02x:%02x!\n",
+        "I have a connection and my MAC is: %02x:%02x:%02x:%02x:%02x:%02x!\n",
         baseMac[0], baseMac[1], baseMac[2], baseMac[3], baseMac[4], baseMac[5]);
   } else {
     ESP_LOGE(TAG, "Failed to read MAC address");
@@ -120,13 +144,12 @@ extern "C" void app_main(void) {
    * the wifi manager */
   wifi_manager_set_callback(WM_EVENT_STA_GOT_IP, &cb_connection_ok);
 
+  /* create and start the disconnect button */
+  DisconectBtn *disconnect_btn = new DisconectBtn(GPIO_NUM_5);
+  disconnect_btn->start();
+
   /* your code should go here. Here we simply create a task on core 2 that
    * monitors free heap memory */
-  xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1,
-                          NULL, 1);
-
-  // Parte em testes
-  btn_evt_queue = xQueueCreate(10, sizeof(int));
-  // xTaskCreate(trataInterrupcaoBotao, "TrataBotao", 2048, NULL, 1, NULL);
-  gpio_install_isr_service(0);
+  // xTaskCreatePinnedToCore(&monitoring_task, "monitoring_task", 2048, NULL, 1,
+  //                         NULL, 1);
 }

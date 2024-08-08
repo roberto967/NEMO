@@ -65,19 +65,28 @@ static char* http_css_url = NULL;
 static char* http_connect_url = NULL;
 static char* http_ap_url = NULL;
 static char* http_status_url = NULL;
+/* Gerar URLs para Bootstrap */
+static char *http_bootstrap_css_url = NULL;
+static char *http_bootstrap_js_url = NULL;
 
 /**
  * @brief embedded binary data.
  * @see file "component.mk"
  * @see https://docs.espressif.com/projects/esp-idf/en/latest/api-guides/build-system.html#embedding-binary-data
  */
+extern const uint8_t
+    bootstrap_min_css_start[] asm("_binary_bootstrap_min_css_start");
+extern const uint8_t
+    bootstrap_min_css_end[] asm("_binary_bootstrap_min_css_end");
+extern const uint8_t
+    bootstrap_min_js_start[] asm("_binary_bootstrap_min_js_start");
+extern const uint8_t bootstrap_min_js_end[] asm("_binary_bootstrap_min_js_end");
 extern const uint8_t style_css_start[] asm("_binary_style_css_start");
 extern const uint8_t style_css_end[]   asm("_binary_style_css_end");
 extern const uint8_t code_js_start[] asm("_binary_code_js_start");
 extern const uint8_t code_js_end[] asm("_binary_code_js_end");
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
 extern const uint8_t index_html_end[] asm("_binary_index_html_end");
-
 
 /* const httpd related values stored in ROM */
 const static char http_200_hdr[] = "200 OK";
@@ -287,6 +296,18 @@ static esp_err_t http_server_get_handler(httpd_req_t *req){
 			/* request a wifi scan */
 			wifi_manager_scan_async();
 		}
+    /* GET /bootstrap.min.css */
+    if(strcmp(req->uri, http_bootstrap_css_url) == 0){
+        httpd_resp_set_status(req, http_200_hdr);
+        httpd_resp_set_type(req, http_content_type_css);
+        httpd_resp_send(req, (char*)bootstrap_min_css_start, bootstrap_min_css_end - bootstrap_min_css_start);
+    }
+    /* GET /bootstrap.min.js */
+    else if(strcmp(req->uri, http_bootstrap_js_url) == 0){
+        httpd_resp_set_status(req, http_200_hdr);
+        httpd_resp_set_type(req, http_content_type_js);
+        httpd_resp_send(req, (char*)bootstrap_min_js_start, bootstrap_min_js_end - bootstrap_min_js_start);
+    }
 		/* GET /status.json */
 		else if(strcmp(req->uri, http_status_url) == 0){
 
@@ -389,6 +410,15 @@ void http_app_stop(){
 			free(http_status_url);
 			http_status_url = NULL;
 		}
+    /* Dealloc URLs para Bootstrap */
+    if(http_bootstrap_css_url){
+      free(http_bootstrap_css_url);
+      http_bootstrap_css_url = NULL;
+    }
+    if(http_bootstrap_js_url){
+      free(http_bootstrap_js_url);
+      http_bootstrap_js_url = NULL;
+    }
 
 		/* stop server */
 		httpd_stop(httpd_handle);
@@ -438,8 +468,10 @@ void http_app_start(bool lru_purge_enable){
 			const char page_connect[] = "connect.json";
 			const char page_ap[] = "ap.json";
 			const char page_status[] = "status.json";
+      const char page_bootstrap_css[] = "bootstrap.min.css";
+      const char page_bootstrap_js[] = "bootstrap.min.js";
 
-			/* root url, eg "/"   */
+      /* root url, eg "/"   */
 			const size_t http_root_url_sz = sizeof(char) * (root_len+1);
 			http_root_url = malloc(http_root_url_sz);
 			memset(http_root_url, 0x00, http_root_url_sz);
@@ -463,7 +495,9 @@ void http_app_start(bool lru_purge_enable){
 			http_connect_url = http_app_generate_url(page_connect);
 			http_ap_url = http_app_generate_url(page_ap);
 			http_status_url = http_app_generate_url(page_status);
-
+      /* Gerar URLs para Bootstrap */
+      http_bootstrap_css_url = http_app_generate_url(page_bootstrap_css);
+      http_bootstrap_js_url = http_app_generate_url(page_bootstrap_js);
 		}
 
 		err = httpd_start(&httpd_handle, &config);
